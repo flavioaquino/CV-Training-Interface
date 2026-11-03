@@ -1,0 +1,13 @@
+car_back
+car_front
+cellphone_infraction
+has_rearview
+helmet
+infraction_ontruck
+no_hand
+no_helmet
+no_rearview
+no_seatbelt
+sandals_infraction
+seatbelt
+shoes

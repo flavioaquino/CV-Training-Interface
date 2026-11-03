@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Revisor de anotações</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <strong>Revisor de anotações</strong>
+    <div id="progresso">
+      <div id="barra"><div id="barra-cheia"></div></div>
+      <span id="progresso-texto"></span>
+    </div>
+    <span id="job-banner" hidden>
+      <span id="job-msg"></span>
+      <span id="job-bar"><span id="job-bar-cheia"></span></span>
+    </span>
+    <button id="btn-importar" title="Adicionar fotos ao dataset">Inserir fotos</button>
+    <button id="btn-versoes" title="Snapshots dos rótulos, sem as fotos">Versões</button>
+    <button id="btn-ajuda" title="Atalhos de teclado">Atalhos (?)</button>
+  </header>
+
+  <main>
+    <aside id="esquerda">
+      <div class="filtros">
+        <label>Status
+          <select id="f-status">
+            <option value="pendentes" selected>Não revisadas</option>
+            <option value="revisadas">Revisadas</option>
+            <option value="todas">Todas</option>
+          </select>
+        </label>
+        <label>Classe confirmada pelo backend <select id="f-origem"></select></label>
+        <label>Contém a classe <select id="f-contem"></select></label>
+        <label class="linha"><input type="checkbox" id="f-conflito"> Só imagens com conflito</label>
+        <label class="linha"><input type="checkbox" id="f-importadas"> Só fotos inseridas depois</label>
+        <label>Ordem
+          <select id="f-ordem">
+            <option value="prioridade">Prioridade (conflitos primeiro)</option>
+            <option value="nome">Nome</option>
+          </select>
+        </label>
+        <div id="f-contagem"></div>
+      </div>
+      <ul id="lista"></ul>
+    </aside>
+
+    <section id="centro">
+      <canvas id="tela"></canvas>
+      <div id="status-barra">
+        <span id="s-stem"></span>
+        <span id="s-fonte"></span>
+        <span id="s-sujo"></span>
+        <span id="s-zoom"></span>
+      </div>
+    </section>
+
+    <aside id="direita">
+      <h3>Classes <small>(tecla)</small></h3>
+      <ul id="paleta"></ul>
+
+      <h3>Limiar de confiança</h3>
+      <div id="limiar" class="limiar">
+        <div id="aviso-conf" class="aviso" hidden></div>
+        <label class="linha-limiar">
+          Geral
+          <input type="range" id="limiar-geral" min="0" max="100" value="25" step="1">
+          <span id="limiar-geral-val">0,25</span>
+        </label>
+        <label class="linha"><input type="checkbox" id="limiar-esconder" checked> Esconder abaixo do limiar</label>
+        <label class="linha"><input type="checkbox" id="limiar-por-classe"> Limiar por classe</label>
+        <ul id="limiar-classes" class="limiar-classes" hidden></ul>
+        <button id="btn-aplicar-limiar" title="Apaga desta imagem as sugestões abaixo do limiar (não mexe nas caixas ✓ do backend)">Aplicar limiar nesta imagem</button>
+        <div id="limiar-info" class="hint"></div>
+      </div>
+
+      <h3>Caixas nesta imagem <small id="n-caixas"></small></h3>
+      <ul id="caixas"></ul>
+      <div class="acoes">
+        <button id="btn-salvar" class="primario">Salvar e próxima <kbd>Enter</kbd></button>
+        <button id="btn-desfazer">Desfazer <kbd>Ctrl+Z</kbd></button>
+        <button id="btn-restaurar">Descartar revisão desta imagem</button>
+      </div>
+    </aside>
+  </main>
+
+  <dialog id="ajuda">
+    <h2>Como usar</h2>
+    <table>
+      <tr><th colspan="2">Navegação</th></tr>
+      <tr><td><kbd>Enter</kbd></td><td>Salvar (marca como revisada) e ir para a próxima</td></tr>
+      <tr><td><kbd>D</kbd> / <kbd>→</kbd></td><td>Próxima imagem (salva se você alterou algo)</td></tr>
+      <tr><td><kbd>A</kbd> / <kbd>←</kbd></td><td>Imagem anterior (salva se você alterou algo)</td></tr>
+      <tr><td><kbd>Ctrl+S</kbd></td><td>Salvar sem sair da imagem</td></tr>
+      <tr><th colspan="2">Caixas</th></tr>
+      <tr><td>arrastar no vazio</td><td>Desenhar caixa nova com a classe ativa</td></tr>
+      <tr><td><kbd>Shift</kbd> + arrastar</td><td>Desenha uma caixa nova mesmo em cima de outra (ignora as existentes)</td></tr>
+      <tr><td>clicar numa caixa</td><td>Selecionar (a menor caixa sob o cursor ganha)</td></tr>
+      <tr><td><kbd>Ctrl+C</kbd> / <kbd>Ctrl+V</kbd></td><td>Copiar e colar. Com caixa selecionada, copia só ela; sem seleção, copia as visíveis. A colagem vale em outra imagem e cada uma desloca um pouco</td></tr>
+      <tr><td>arrastar a caixa / as alças</td><td>Mover / redimensionar</td></tr>
+      <tr><td><kbd>Tab</kbd></td><td>Selecionar a próxima caixa</td></tr>
+      <tr><td><kbd>1</kbd>…<kbd>0</kbd>, <kbd>Q</kbd>, <kbd>W</kbd>, <kbd>E</kbd>…</td><td>Com caixa selecionada: troca a classe dela. Sem seleção: escolhe a classe ativa</td></tr>
+      <tr><td><kbd>Del</kbd> / <kbd>Backspace</kbd></td><td>Apagar a caixa selecionada</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Tirar a seleção</td></tr>
+      <tr><td><kbd>Ctrl+Z</kbd></td><td>Desfazer</td></tr>
+      <tr><th colspan="2">Visualização</th></tr>
+      <tr><td>roda do mouse</td><td>Zoom no ponto do cursor</td></tr>
+      <tr><td>botão direito / <kbd>Espaço</kbd> + arrastar</td><td>Mover a imagem</td></tr>
+      <tr><td><kbd>F</kbd></td><td>Encaixar a imagem na tela</td></tr>
+      <tr><td><kbd>H</kbd></td><td>Esconder/mostrar todas as caixas</td></tr>
+      <tr><td><kbd>L</kbd></td><td>Esconder/mostrar os nomes das caixas</td></tr>
+      <tr><th colspan="2">Limiar de confiança</th></tr>
+      <tr><td>limiar geral / por classe</td><td>Esconde (ou marca) sugestões abaixo do valor. Caixas ✓ do backend nunca somem</td></tr>
+      <tr><td>Aplicar limiar nesta imagem</td><td>Apaga de vez as sugestões escondidas; use <kbd>Ctrl+Z</kbd> se errou</td></tr>
+      <tr><th colspan="2">Legenda</th></tr>
+      <tr><td>✓ linha grossa</td><td>Caixa confirmada pelo backend</td></tr>
+      <tr><td>linha tracejada</td><td>Sugestão abaixo do limiar atual (ainda visível se "esconder" estiver desligado)</td></tr>
+      <tr><td>número após o nome</td><td>Confiança da sugestão (some quando você edita a caixa)</td></tr>
+      <tr><th colspan="2">Dataset</th></tr>
+      <tr><td>Inserir fotos</td><td>Fotos avulsas, ou um export YOLO completo que já esteja na pasta do projeto</td></tr>
+      <tr><td>Versões</td><td>Snapshot só dos rótulos (não das fotos). Restaurar volta os rótulos daquela versão; fotos novas continuam no dataset</td></tr>
+    </table>
+    <form method="dialog"><button class="primario">Fechar</button></form>
+  </dialog>
+
+  <dialog id="dlg-importar" class="largo">
+    <h2>Inserir fotos</h2>
+    <p class="hint">As imagens entram em <code>work/revisao/images</code> como JPG. O export YOLO original não é alterado.</p>
+
+    <h3>Dataset YOLO pronto</h3>
+    <p class="hint">Pastas no projeto com <code>images/</code>, <code>labels/</code> e <code>data.yaml</code>. As classes são traduzidas pelo nome (ex.: <code>no_seatbelt</code>).</p>
+    <label class="bloco">Pasta
+      <select id="imp-ds"></select>
+    </label>
+    <p id="imp-ds-info" class="hint"></p>
+    <div class="acoes-dlg">
+      <button type="button" class="primario" id="btn-imp-ds">Importar este dataset</button>
+    </div>
+    <hr class="sep">
+    <h3>Fotos avulsas</h3>
+    <form id="form-importar">
+      <label class="bloco">Arquivos
+        <input id="imp-files" type="file" accept="image/jpeg,image/png,image/webp,image/bmp,.jpg,.jpeg,.png,.webp,.bmp" multiple>
+      </label>
+      <div id="imp-drop" class="drop">Solte as fotos aqui, ou escolha acima</div>
+      <p id="imp-n" class="hint"></p>
+      <label class="linha">
+        <input type="checkbox" id="imp-preclass" checked>
+        Pré-classificar com o modelo depois de inserir
+      </label>
+      <label class="linha-limiar" id="imp-conf-linha">
+        Confiança mínima
+        <input type="range" id="imp-conf" min="5" max="90" value="25" step="1">
+        <span id="imp-conf-val">0,25</span>
+      </label>
+      <p id="imp-modelo" class="hint"></p>
+      <p id="imp-status" class="hint"></p>
+      <div class="acoes-dlg">
+        <button type="submit" class="primario" id="btn-imp-ok">Inserir</button>
+        <button type="button" id="btn-imp-preclass">Pré-classificar fotos novas já inseridas</button>
+        <button type="button" id="btn-imp-fechar" value="cancel">Fechar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-versoes" class="largo">
+    <h2>Versões do dataset</h2>
+    <p class="hint">Cada versão copia os rótulos revisados e as pré-anotações. As fotos não entram no snapshot.</p>
+    <form id="form-versao">
+      <label class="bloco">Nome
+        <input id="ver-nome" type="text" maxlength="60" placeholder="ex.: depois da leva de 27/10">
+      </label>
+      <label class="bloco">Nota
+        <input id="ver-nota" type="text" maxlength="200" placeholder="opcional">
+      </label>
+      <button type="submit" class="primario" id="btn-ver-criar">Criar versão agora</button>
+    </form>
+    <p id="ver-status" class="hint"></p>
+    <ul id="lista-versoes"></ul>
+    <form method="dialog"><button>Fechar</button></form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

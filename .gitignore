@@ -1,0 +1,28 @@
+# Dataset bruto e imagens (~1,4 GB) — ficam só no PC local
+infractions-yolo-*/
+work/revisao/images/
+datasets/
+runs/
+weights/
+scratch/
+
+# Pesos / modelos — confidenciais (não versionar)
+models/
+*.pt
+*.onnx
+*.engine
+
+# Ambiente e lixo
+.venv/
+__pycache__/
+work/cvat/
+work/cvat_export/
+work/revisor.log
+work/tmp_teste/
+
+# Progresso de anotações versionado (sem fotos nem pesos):
+# - work/revisado/          rótulos e meta revisados
+# - work/revisao/labels/    pré-anotações
+# - work/revisao/conf/      confianças
+# - work/revisao/classes.txt, prioridade_revisao.csv
+# - work/versoes/           snapshots de rótulos (sem fotos)
