@@ -148,6 +148,54 @@ class DatasetYoloTeste(unittest.TestCase):
         self.assertEqual(orig["caixas"][0]["c"], 0)
 
 
+class TreinoMontagemTeste(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.revisao = self.root / "revisao"
+        self.revisado = self.root / "revisado"
+        (self.revisao / "images").mkdir(parents=True)
+        (self.revisao / "labels").mkdir()
+        (self.revisado / "labels").mkdir(parents=True)
+        (self.revisao / "classes.txt").write_text("a\nb\n", encoding="utf-8")
+        (self.revisao / "prioridade_revisao.csv").write_text(
+            "stem,classe_original,sugestoes,incertas,conflitos,conf_min\n"
+            "f1,a,0,0,0,\nf2,b,0,0,0,\nf3,a,0,0,0,\n",
+            encoding="utf-8",
+        )
+        for i, nome in enumerate(("f1", "f2", "f3")):
+            Image.new("RGB", (32, 24), (i * 40, 10, 10)).save(self.revisao / "images" / f"{nome}.jpg", "JPEG")
+            (self.revisado / "labels" / f"{nome}.txt").write_text(
+                f"{i % 2} 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_montar_split_e_resumo(self):
+        from revisor.treino import montar_dataset, resumo_treino
+        info = montar_dataset(self.revisao, self.revisado, self.root / "ds", fracao_val=0.34)
+        self.assertEqual(info["n_total"], 3)
+        self.assertEqual(info["n_train"] + info["n_val"], 3)
+        self.assertTrue((self.root / "ds" / "data.yaml").exists())
+        self.assertTrue((self.root / "ds" / "images" / "train").exists() or
+                        (self.root / "ds" / "images" / "val").exists())
+        r = resumo_treino(self.revisao, self.revisado)
+        self.assertEqual(r["n_revisadas"], 3)
+        self.assertEqual(r["classes"], ["a", "b"])
+
+    def test_api_resumo_modelos(self):
+        d = DatasetTmp()
+        try:
+            r = d.client.get("/api/treino/resumo")
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertIn("bases", r.json())
+            m = d.client.get("/api/modelos")
+            self.assertEqual(m.status_code, 200)
+            self.assertIn("experimentos", m.json())
+        finally:
+            d.close()
+
+
 class VersoesTeste(unittest.TestCase):
     def setUp(self):
         self.d = DatasetTmp()

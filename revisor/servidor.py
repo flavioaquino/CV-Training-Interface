@@ -58,6 +58,24 @@ class PedidoDataset(BaseModel):
     conf: float = 0.25
 
 
+class PedidoTreino(BaseModel):
+    nome: str = ""
+    base: str = "fiscalizer_reconstruido.pt"
+    epochs: int = 60
+    patience: int = 15
+    imgsz: int = 640
+    batch: int = -1
+    fracao_val: float = 0.15
+    workers: int = 0
+
+
+class PedidoTeste(BaseModel):
+    modelo: str
+    stem: str | None = None
+    conf: float = 0.25
+    imgsz: int = 640
+
+
 def ler_yolo(caminho):
     if not caminho.exists():
         return []
@@ -333,6 +351,8 @@ def criar_app(revisao, revisado, modelo=None, raiz=None):
     raiz = Path(raiz) if raiz else Path(revisao).resolve().parent.parent
     modelo_path = Path(modelo) if modelo else raiz / MODELO_PADRAO
     banco = BancoVersoes(Path(revisao).resolve().parent / "versoes", revisao, revisado)
+    from .treino import GerenteTreino
+    gerente = GerenteTreino(raiz, revisao, revisado)
     jobs = {}
     jobs_lock = threading.Lock()
     app = FastAPI(title="Revisor de anotações")
@@ -522,6 +542,98 @@ def criar_app(revisao, revisado, modelo=None, raiz=None):
             return banco.apagar(vid)
         except FileNotFoundError as e:
             raise HTTPException(404, str(e))
+
+    @app.get("/api/treino/resumo")
+    def treino_resumo():
+        from .treino import bases_disponiveis, resumo_treino
+        return {
+            **resumo_treino(revisao, revisado),
+            "bases": bases_disponiveis(raiz),
+            "jobs_ativos": [j for j in gerente.jobs.values() if j["status"] == "rodando"],
+        }
+
+    @app.get("/api/modelos")
+    def listar_modelos():
+        from .treino import bases_disponiveis, listar_experimentos
+        return {
+            "bases": bases_disponiveis(raiz),
+            "experimentos": listar_experimentos(gerente.runs),
+        }
+
+    @app.get("/api/modelos/{exp_id}")
+    def detalhe_modelo(exp_id: str):
+        from .treino import detalhe_experimento
+        try:
+            return detalhe_experimento(gerente.runs, exp_id)
+        except FileNotFoundError as e:
+            raise HTTPException(404, str(e))
+
+    @app.get("/api/modelos/{exp_id}/plot/{arquivo}")
+    def plot_modelo(exp_id: str, arquivo: str):
+        if "/" in arquivo or "\\" in arquivo or ".." in arquivo:
+            raise HTTPException(400, "arquivo inválido")
+        caminho = gerente.runs / exp_id / arquivo
+        if not caminho.exists() or caminho.suffix.lower() != ".png":
+            raise HTTPException(404, "plot não encontrado")
+        return FileResponse(caminho, headers={"Cache-Control": "max-age=60"})
+
+    @app.post("/api/treino")
+    def iniciar_treino(pedido: PedidoTreino):
+        try:
+            return gerente.iniciar(
+                nome=pedido.nome,
+                base=pedido.base,
+                epochs=pedido.epochs,
+                patience=pedido.patience,
+                imgsz=pedido.imgsz,
+                batch=pedido.batch,
+                fracao_val=pedido.fracao_val,
+                workers=pedido.workers,
+            )
+        except (ValueError, RuntimeError, FileNotFoundError) as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/api/treino/{jid}")
+    def status_treino(jid: str):
+        try:
+            return gerente.status(jid)
+        except FileNotFoundError:
+            raise HTTPException(404, "job de treino desconhecido")
+
+    def _resolver_modelo(mid):
+        from .treino import caminho_modelo
+        try:
+            return caminho_modelo(raiz, mid)
+        except FileNotFoundError:
+            raise HTTPException(404, f"modelo não encontrado: {mid}")
+
+    @app.post("/api/testar")
+    def testar_stem(pedido: PedidoTeste):
+        from .treino import inferir
+        if not pedido.stem:
+            raise HTTPException(400, "informe stem")
+        checar(pedido.stem)
+        return inferir(_resolver_modelo(pedido.modelo), ds.dir_imgs / f"{pedido.stem}.jpg",
+                       conf=pedido.conf, imgsz=pedido.imgsz)
+
+    @app.post("/api/testar-arquivo")
+    async def testar_arquivo(modelo: str = Form(...),
+                             conf: float = Form(0.25),
+                             imgsz: int = Form(640),
+                             file: UploadFile = File(...)):
+        from .treino import inferir
+        ext = Path(file.filename or "foto.jpg").suffix.lower() or ".jpg"
+        if ext not in EXTENSOES:
+            raise HTTPException(400, "formato de imagem não suportado")
+        dados = await file.read()
+        tmp = Path(revisao).resolve().parent / "tmp_teste"
+        tmp.mkdir(parents=True, exist_ok=True)
+        img_path = tmp / f"upload_{uuid.uuid4().hex[:8]}{ext}"
+        try:
+            img_path.write_bytes(dados)
+            return inferir(_resolver_modelo(modelo), img_path, conf=conf, imgsz=imgsz)
+        finally:
+            img_path.unlink(missing_ok=True)
 
     @app.get("/img/{stem}")
     def arquivo(stem: str):

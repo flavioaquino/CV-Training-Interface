@@ -652,7 +652,7 @@ tela.addEventListener("wheel", (ev) => {
 // ---------------------------------------------------------------- teclado
 
 function dialogoAberto() {
-  return $("ajuda").open || $("dlg-importar").open || $("dlg-versoes").open;
+  return $("ajuda").open || $("dlg-importar").open || $("dlg-versoes").open || $("dlg-modelos").open;
 }
 
 window.addEventListener("keydown", (ev) => {
@@ -1152,6 +1152,284 @@ $("lista-versoes").addEventListener("click", async (ev) => {
     }
   }
 });
+
+// ---------------------------------------------------------------- modelos (treino / métricas / teste)
+
+const CORES_TST = CORES;
+let TST = { img: null, caixas: [], classes: [] };
+let TRN_JOB = null;
+
+function fmtNum(v, casas = 3) {
+  if (v == null || Number.isNaN(+v)) return "—";
+  return (+v).toFixed(casas).replace(".", ",");
+}
+
+document.querySelectorAll("#dlg-modelos .aba").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#dlg-modelos .aba").forEach((b) => b.classList.toggle("ativa", b === btn));
+    for (const id of ["treino", "exps", "teste"]) {
+      $(`aba-${id}`).hidden = btn.dataset.aba !== id;
+    }
+    if (btn.dataset.aba === "exps") carregarExperimentos();
+    if (btn.dataset.aba === "teste") preencherTesteModelos();
+  });
+});
+
+async function abrirModelos() {
+  $("trn-status").textContent = "";
+  $("dlg-modelos").showModal();
+  document.querySelector('#dlg-modelos .aba[data-aba="treino"]').click();
+  try {
+    const r = await api("GET", "/api/treino/resumo");
+    $("trn-resumo").textContent =
+      `${r.n_revisadas} revisadas prontas para treino` +
+      ` · ${r.n_pendentes} ainda sem revisão` +
+      ` · ${r.classes.length} classes`;
+    $("trn-base").innerHTML = (r.bases || []).map((b) =>
+      `<option value="${esc(b.id)}">${esc(b.nome)} (${esc(b.tipo)})</option>`).join("");
+    if (r.jobs_ativos?.length) {
+      TRN_JOB = r.jobs_ativos[0].id;
+      acompanharTreino(TRN_JOB);
+    }
+  } catch (e) {
+    $("trn-resumo").textContent = e.message;
+  }
+}
+$("btn-modelos").addEventListener("click", abrirModelos);
+
+$("btn-trn-start").addEventListener("click", async () => {
+  if (!confirm("Montar o dataset com as fotos revisadas e iniciar o treino?\nIsso usa a GPU e pode levar horas.")) return;
+  $("btn-trn-start").disabled = true;
+  $("trn-status").textContent = "Iniciando…";
+  try {
+    const job = await api("POST", "/api/treino", {
+      nome: $("trn-nome").value.trim(),
+      base: $("trn-base").value,
+      epochs: +$("trn-epochs").value,
+      patience: +$("trn-patience").value,
+      imgsz: +$("trn-imgsz").value,
+      batch: +$("trn-batch").value,
+      fracao_val: +$("trn-fracao").value,
+      workers: 0,
+    });
+    TRN_JOB = job.id;
+    $("trn-status").textContent = `Job ${job.id} iniciado.`;
+    acompanharTreino(job.id);
+  } catch (e) {
+    $("trn-status").textContent = "Falha: " + e.message;
+  }
+  $("btn-trn-start").disabled = false;
+});
+
+function mostrarTreino(j) {
+  const box = $("trn-job");
+  if (!j) { box.hidden = true; return; }
+  box.hidden = false;
+  $("trn-job-msg").textContent = j.msg || j.status;
+  let pct = 0;
+  if (j.status === "ok") {
+    pct = 100;
+  } else if (j.status === "erro") {
+    pct = j.total ? Math.round(100 * (j.feito || 0) / j.total) : 0;
+  } else if (j.total) {
+    pct = Math.min(99, Math.round(100 * (j.feito || 0) / j.total));
+  }
+  $("trn-job-cheia").style.width = `${pct}%`;
+  const m = j.metricas || {};
+  const partes = [];
+  if (j.status === "rodando" && j.total) {
+    partes.push(`progresso ${j.feito || 0}/${j.total}`);
+  }
+  if (j.status === "ok" && j.epochs_rodadas != null) {
+    partes.push(`${j.epochs_rodadas} época(s) rodada(s)` + (j.early_stop ? " · early stop" : ""));
+  }
+  if (m.map50 != null) {
+    partes.push(`mAP50 ${fmtNum(m.map50)} · mAP50-95 ${fmtNum(m.map50_95)} · melhor época ${m.epoca_melhor ?? "—"}`);
+  }
+  $("trn-job-met").textContent = partes.join(" · ");
+}
+
+async function acompanharTreino(jid) {
+  for (;;) {
+    let j;
+    try { j = await api("GET", `/api/treino/${jid}`); }
+    catch (e) { $("trn-status").textContent = e.message; mostrarTreino(null); return; }
+    mostrarTreino(j);
+    if (j.status === "ok") {
+      $("trn-status").textContent =
+        `Concluído · best em ${j.best || "—"} · mAP50 ${fmtNum(j.metricas?.map50)}` +
+        (j.early_stop ? ` · parou na época ${j.epochs_rodadas}/${j.epochs}` : "");
+      return j;
+    }
+    if (j.status === "erro") {
+      $("trn-status").textContent = "Treino falhou: " + (j.erro || "");
+      return j;
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
+
+async function carregarExperimentos() {
+  $("exp-status").textContent = "Carregando…";
+  $("exp-detalhe").hidden = true;
+  try {
+    const r = await api("GET", "/api/modelos");
+    const exps = r.experimentos || [];
+    if (!exps.length) {
+      $("lista-exps").innerHTML = `<li class="exp-meta">Nenhum experimento em runs/ ainda.</li>`;
+      $("exp-status").textContent = "";
+      return;
+    }
+    $("lista-exps").innerHTML = exps.map((e) => {
+      const m = e.metricas || {};
+      return `<li data-id="${esc(e.id)}">` +
+        `<div><strong>${esc(e.id)}</strong>` +
+        `<div class="exp-meta">${esc(e.criado_em)} · mAP50 ${fmtNum(m.map50)} · mAP50-95 ${fmtNum(m.map50_95)} · ` +
+        `${m.epochs_feitas ?? "?"} épocas</div></div>` +
+        `<button type="button" data-ver="${esc(e.id)}">Detalhes</button></li>`;
+    }).join("");
+    $("exp-status").textContent = `${exps.length} experimento(s)`;
+  } catch (e) {
+    $("exp-status").textContent = e.message;
+  }
+}
+
+$("lista-exps").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("[data-ver]") || ev.target.closest("li[data-id]");
+  if (!btn) return;
+  const id = btn.dataset.ver || btn.dataset.id;
+  $("lista-exps").querySelectorAll("li").forEach((li) => li.classList.toggle("sel", li.dataset.id === id));
+  try {
+    const d = await api("GET", `/api/modelos/${encodeURIComponent(id)}`);
+    $("exp-detalhe").hidden = false;
+    $("exp-titulo").textContent = d.id;
+    const m = d.metricas || {};
+    $("exp-metricas").innerHTML = [
+      ["mAP50", m.map50], ["mAP50-95", m.map50_95],
+      ["Precisão", m.precisao], ["Recall", m.recall],
+    ].map(([k, v]) => `<div class="met-card"><div class="k">${k}</div><div class="v">${fmtNum(v)}</div></div>`).join("");
+    const curva = d.curva || [];
+    if (curva.length) {
+      const ultimo = curva[curva.length - 1];
+      $("exp-curva").textContent =
+        `${curva.length} épocas registradas · última mAP50 ${fmtNum(ultimo.map50)}` +
+        (m.epoca_melhor != null ? ` · pico na época ${m.epoca_melhor}` : "");
+    } else {
+      $("exp-curva").textContent = "Sem results.csv ainda.";
+    }
+    $("exp-plots").innerHTML = (d.plots || []).slice(0, 8).map((p) =>
+      `<img src="/api/modelos/${encodeURIComponent(id)}/plot/${encodeURIComponent(p)}" alt="${esc(p)}" title="${esc(p)}">`
+    ).join("");
+  } catch (e) {
+    $("exp-status").textContent = e.message;
+  }
+});
+
+async function preencherTesteModelos() {
+  try {
+    const r = await api("GET", "/api/modelos");
+    const opts = [];
+    for (const b of r.bases || []) opts.push(`<option value="${esc(b.id)}">${esc(b.nome)}</option>`);
+    for (const e of r.experimentos || []) {
+      if (e.best) opts.push(`<option value="${esc(e.id)}">${esc(e.id)} (best)</option>`);
+    }
+    $("tst-modelo").innerHTML = opts.join("") || `<option value="">Nenhum modelo</option>`;
+    $("tst-stems").innerHTML = S.itens.slice(0, 2000).map((i) =>
+      `<option value="${esc(i.stem)}">`).join("");
+  } catch (e) {
+    $("tst-status").textContent = e.message;
+  }
+}
+
+$("tst-conf").addEventListener("input", () => {
+  $("tst-conf-val").textContent = fmtConf(+$("tst-conf").value / 100);
+});
+
+$("btn-tst-atual").addEventListener("click", () => {
+  if (S.stem) $("tst-stem").value = S.stem;
+});
+
+function desenharTeste() {
+  const cnv = $("tst-tela");
+  const ctx = cnv.getContext("2d");
+  const W = cnv.width, H = cnv.height;
+  ctx.fillStyle = "#111";
+  ctx.fillRect(0, 0, W, H);
+  if (!TST.img) return;
+  const iw = TST.img.naturalWidth, ih = TST.img.naturalHeight;
+  const e = Math.min(W / iw, H / ih);
+  const ox = (W - iw * e) / 2, oy = (H - ih * e) / 2;
+  ctx.drawImage(TST.img, ox, oy, iw * e, ih * e);
+  for (const b of TST.caixas) {
+    const x1 = ox + (b.x - b.w / 2) * iw * e;
+    const y1 = oy + (b.y - b.h / 2) * ih * e;
+    const ww = b.w * iw * e, hh = b.h * ih * e;
+    const cor = CORES_TST[b.c % CORES_TST.length];
+    ctx.strokeStyle = cor;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x1, y1, ww, hh);
+    const txt = `${b.nome || "?"} ${b.conf != null ? b.conf.toFixed(2) : ""}`;
+    ctx.font = "12px system-ui";
+    const tw = ctx.measureText(txt).width + 6;
+    ctx.fillStyle = cor;
+    ctx.fillRect(x1, Math.max(0, y1 - 16), tw, 16);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(txt, x1 + 3, Math.max(12, y1 - 4));
+  }
+}
+
+async function rodarTeste() {
+  const mid = $("tst-modelo").value;
+  if (!mid) { $("tst-status").textContent = "Escolha um modelo."; return; }
+  $("btn-tst-run").disabled = true;
+  $("tst-status").textContent = "Detectando…";
+  let r;
+  try {
+    const arquivo = $("tst-file").files[0];
+    if (arquivo) {
+      const fd = new FormData();
+      fd.append("modelo", mid);
+      fd.append("conf", String(+$("tst-conf").value / 100));
+      fd.append("imgsz", "640");
+      fd.append("file", arquivo);
+      const resp = await fetch("/api/testar-arquivo", { method: "POST", body: fd });
+      if (!resp.ok) throw new Error(await resp.text());
+      r = await resp.json();
+      TST.img = await new Promise((res, rej) => {
+        const im = new Image();
+        im.onload = () => res(im);
+        im.onerror = () => rej(new Error("falha ao carregar upload"));
+        im.src = URL.createObjectURL(arquivo);
+      });
+    } else {
+      const stem = $("tst-stem").value.trim() || S.stem;
+      if (!stem) throw new Error("Informe um stem ou envie um arquivo.");
+      r = await api("POST", "/api/testar", {
+        modelo: mid, stem, conf: +$("tst-conf").value / 100, imgsz: 640,
+      });
+      TST.img = await new Promise((res, rej) => {
+        const im = new Image();
+        im.onload = () => res(im);
+        im.onerror = () => rej(new Error("falha ao carregar imagem"));
+        im.src = `/img/${encodeURIComponent(stem)}`;
+      });
+    }
+  } catch (e) {
+    $("tst-status").textContent = "Falha: " + e.message;
+    $("btn-tst-run").disabled = false;
+    return;
+  }
+  TST.caixas = r.caixas || [];
+  TST.classes = r.classes || [];
+  $("tst-caixas").innerHTML = TST.caixas.map((b) =>
+    `<li><span class="cor" style="background:${CORES_TST[b.c % CORES_TST.length]}"></span>` +
+    `${esc(b.nome)} <span class="info">${b.conf?.toFixed(2) ?? ""}</span></li>`
+  ).join("") || `<li class="hint">Nenhuma detecção</li>`;
+  $("tst-status").textContent = `${TST.caixas.length} caixa(s)`;
+  desenharTeste();
+  $("btn-tst-run").disabled = false;
+}
+$("btn-tst-run").addEventListener("click", rodarTeste);
 
 // ---------------------------------------------------------------- início
 

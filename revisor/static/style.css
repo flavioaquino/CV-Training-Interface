@@ -198,3 +198,59 @@ dialog hr.sep { border: none; border-top: 1px solid #2c3036; margin: 16px 0; }
 button.perigo { background: #4a2226; border-color: #8a3a42; }
 button.perigo:hover { background: #5c2a30; }
 dialog.largo { min-width: min(560px, 92vw); }
+dialog.xlargo {
+  min-width: min(820px, 94vw);
+  width: min(820px, 94vw);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.abas { display: flex; gap: 4px; margin: 10px 0 14px; }
+.aba {
+  flex: 1; text-align: center; padding: 8px;
+  background: #22262b; border: 1px solid #373c44;
+}
+.aba.ativa { background: #2f3d52; border-color: #4a6a95; }
+.grade-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+}
+@media (max-width: 700px) { .grade-form { grid-template-columns: 1fr; } }
+.grade-form input[type="number"],
+.grade-form input[type="text"],
+.grade-form select {
+  font: inherit; color: inherit; background: #262a30;
+  border: 1px solid #373c44; border-radius: 4px; padding: 6px 8px; width: 100%;
+}
+.job-box {
+  margin-top: 10px; padding: 10px; background: #1c2430;
+  border: 1px solid #2c3a50; border-radius: 6px;
+}
+#trn-job-bar, #job-bar {
+  height: 8px; background: #2c3036; border-radius: 4px; overflow: hidden; margin-top: 6px;
+}
+#trn-job-cheia { display: block; height: 100%; width: 0; background: #4363d8; transition: width .3s; }
+#lista-exps { list-style: none; margin: 0; padding: 0; max-height: 28vh; overflow-y: auto; }
+#lista-exps li {
+  display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center;
+  padding: 8px 4px; border-top: 1px solid #2c3036; cursor: pointer;
+}
+#lista-exps li:hover, #lista-exps li.sel { background: #23272c; }
+#lista-exps .exp-meta { color: #9aa0a8; font-size: 12px; }
+.met-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0;
+}
+.met-card {
+  background: #22262b; border: 1px solid #373c44; border-radius: 6px; padding: 8px 10px;
+}
+.met-card .k { color: #9aa0a8; font-size: 11px; }
+.met-card .v { font-size: 18px; font-weight: 600; margin-top: 2px; }
+.plots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.plots img {
+  max-width: 100%; width: calc(50% - 4px); border-radius: 4px; border: 1px solid #2c3036;
+  background: #111; cursor: pointer;
+}
+#tst-view { display: grid; grid-template-columns: 1fr 200px; gap: 12px; margin-top: 12px; }
+#tst-tela { width: 100%; background: #111; border-radius: 4px; border: 1px solid #2c3036; }
+#tst-caixas { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow-y: auto; font-size: 12px; }
+#tst-caixas li { display: flex; gap: 6px; align-items: center; padding: 3px 0; }
